@@ -77,11 +77,10 @@ defmodule Cluster.EcsClusterInfo do
          {:ok, task_arns} <-
            get_tasks_for_services(cluster_name, region, service_arns, service_name),
          {:ok, desc_task_body} <- describe_tasks(cluster_name, task_arns, region),
-         {:ok, arns_ports} <- extract_arns_ports(desc_task_body, container_port),
-         {:ok, ips_ports} <- extract_ips_ports(cluster_name, arns_ports, region) do
+         {:ok, task_ips} <- get_ips(desc_task_body, container_port) do
       {:ok,
-       Map.new(ips_ports, fn {runtime_id, ip, port} ->
-         {runtime_id_to_nodename(runtime_id, app_prefix), {ip, port}}
+       Map.new(task_ips, fn task_ip ->
+         {node_name(task_ip, app_prefix), {task_ip, container_port}}
        end)}
     else
       err ->
@@ -229,89 +228,22 @@ defmodule Cluster.EcsClusterInfo do
 
   defp find_service_arn(_, _), do: {:error, "no service arns returned"}
 
-  defp extract_arns_ports(%{"tasks" => tasks}, container_port) do
+  defp get_ips(%{"tasks" => tasks},  container_port) do
     arns_ports =
       tasks
       |> Enum.flat_map(fn t ->
-        container_instance_arn = Map.get(t, "containerInstanceArn")
-
         Map.get(t, "containers")
-        |> Enum.map(fn c -> {container_instance_arn, c} end)
+        |> Enum.map(fn c ->
+          Map.get(c, "networkInterfaces")
+          |> Enum.map(fn ni ->
+            ni["privateIpv4Address"]
+          end)
+        end)
       end)
-      |> Enum.map(fn {container_instance_arn, c} ->
-        runtime_id =
-          case Map.get(c, "runtimeId") do
-            nil -> nil
-            string -> String.slice(string, 0..11)
-          end
-
-        host_port =
-          case Map.get(c, "networkBindings") do
-            nil ->
-              nil
-
-            network_bindings ->
-              network_bindings
-              |> Enum.find_value(fn
-                %{"containerPort" => ^container_port, "hostPort" => h_port} ->
-                  h_port
-
-                _ ->
-                  false
-              end)
-          end
-
-        if container_instance_arn && runtime_id && host_port do
-          {container_instance_arn, runtime_id, host_port}
-        else
-          nil
-        end
-      end)
-      |> Enum.filter(& &1)
-
     {:ok, arns_ports}
   end
 
-  defp extract_arns_ports(_, _), do: {:error, "can't extract ips"}
-
-  defp extract_ips_ports(cluster_name, arns_ports, region) do
-    import SweetXml
-
-    container_arns =
-      Enum.map(arns_ports, fn {container_arn, _runtime_id, _host_port} -> container_arn end)
-      |> Enum.uniq()
-
-    {:ok, ecs_instances} =
-      case container_arns do
-        [] ->
-          {:ok, []}
-
-        _ ->
-          describe_container_instances(cluster_name, container_arns, region)
-      end
-
-    container_arn_to_ip =
-      Map.get(ecs_instances, "containerInstances")
-      |> Enum.map(fn i ->
-        instance_id = Map.get(i, "ec2InstanceId")
-        {:ok, %{body: body}} = describe_ec2_instances([instance_id], region)
-
-        {:ok, ip_address} =
-          xpath(body, ~x"//privateIpAddress/text()")
-          |> :inet.parse_ipv4_address()
-
-        {Map.get(i, "containerInstanceArn"), ip_address}
-      end)
-      |> Map.new()
-
-    {:ok,
-     Enum.map(arns_ports, fn {container_arn, runtime_id, host_port} ->
-       ip_address = Map.get(container_arn_to_ip, container_arn)
-       {runtime_id, ip_address, host_port}
-     end)}
-  end
-
-  defp runtime_id_to_nodename(runtime_id, app_prefix) do
-    :"#{app_prefix}@#{runtime_id}"
+  defp node_name(ip, app_prefix) do
+    :"#{app_prefix}@#{ip}"
   end
 end
