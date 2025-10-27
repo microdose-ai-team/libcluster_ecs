@@ -1,5 +1,7 @@
 # ClusterEcs
 
+** This Fork has me currently ripping out EC2 functionality crudely in favor of Fargate.
+
 Use this library to set up clustering within AWS ECS.
 
 This library, unlike others, does not rely on configuring your nodes with `awsvpc` networking mode. Instead it queries ECS's port mappings to accomplish the goal.
