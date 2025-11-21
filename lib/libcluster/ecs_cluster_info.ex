@@ -28,7 +28,12 @@ defmodule Cluster.EcsClusterInfo do
 
     state = set_config(config, %{})
 
-    {:ok, nodes} = my_get_nodes(state)
+    nodes = case my_get_nodes(state) do
+      {:ok, nodes} ->
+        nodes
+      _ ->
+        init(config)
+    end
 
     {:ok, state |> Map.put(:nodes, nodes)}
   end
