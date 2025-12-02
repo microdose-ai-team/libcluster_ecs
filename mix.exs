@@ -6,7 +6,7 @@ defmodule ClusterEcs.MixProject do
       app: :libcluster_ecs,
       version: "0.2.0",
       elixir: "~> 1.13",
-      start_permanent: Mix.env() == :prod,
+      start_permanent: System.fetch_env!("MIX_ENV") == "prod",
       name: "Libcluster ECS",
       package: package(),
       source_url: "https://github.com/wuunder/libcluster_ecs",
